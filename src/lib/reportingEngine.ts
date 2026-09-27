@@ -369,7 +369,17 @@ export class ReportingEngine {
         };
 
         if (item.accountCode === '80' || item.accountCode === '90') {
-          cashAndBank.push(bItem);
+          if (item.accountCode === '90' && bItem.amount < 0) {
+            borrowings.push({
+              accountCode: '40',
+              accountName: 'Bank Overdraft / Loans Payable (बैंक ओभरड्राफ्ट / सापटी ४०)',
+              accountNameNp: 'लिएको ऋण / सापटी (बैंक ओभरड्राफ्ट ४०)',
+              category: 'Loans Payable / Borrowings',
+              amount: Math.abs(bItem.amount),
+            });
+          } else {
+            cashAndBank.push(bItem);
+          }
         } else if (item.accountCode === '100') {
           investments.push(bItem);
         } else if (item.accountCode === '110') {
