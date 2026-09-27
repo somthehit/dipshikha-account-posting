@@ -852,12 +852,14 @@ export class ClosingEngine {
     nextFiscalYear: string;
     closingDate: string;
     newYearOpeningDate: string;
+    archivePreviousYearSheets?: boolean;
     user?: string;
   }): Promise<{
     success: boolean;
     openingJournal?: JournalEntry;
     totalAssetsRolled: number;
     totalLiabilitiesRolled: number;
+    archivedSheets?: string[];
     message: string;
   }> {
     // 1. Gather all real accounts balances (Assets-04 & Liabilities 05) as of closing date
@@ -989,14 +991,37 @@ export class ClosingEngine {
       lines,
     };
 
+    // 2. Automated Google Sheets Archival & Clean Rollover
+    let archivedSheets: string[] = [];
+    if (options.archivePreviousYearSheets !== false) {
+      // Step A: Duplicate current year tabs as permanent archives
+      try {
+        archivedSheets = await googleSheetsService.archiveYearEndSheets(options.currentFiscalYear);
+        console.log(`[ClosingEngine] Archived ${archivedSheets.length} sheets for FY ${options.currentFiscalYear}:`, archivedSheets);
+      } catch (archiveErr: any) {
+        console.error('[ClosingEngine] Error archiving sheets:', archiveErr);
+        throw new Error(`गत आर्थिक वर्षका पानाहरू सुरक्षित (Archive Duplicate) गर्न सकिएन: ${archiveErr?.message || archiveErr}`);
+      }
+
+      // Step B: Clear active 4-Khata and Journal transaction rows so new year starts clean
+      try {
+        await googleSheetsService.clearActiveKhataForNewYear();
+        console.log('[ClosingEngine] Cleared active 4-Khata transaction rows for new fiscal year');
+      } catch (clearErr: any) {
+        console.error('[ClosingEngine] Error clearing active khata:', clearErr);
+        throw new Error(`नयाँ वर्षका लागि सक्रिय ४-खाता खाली गर्न सकिएन: ${clearErr?.message || clearErr}`);
+      }
+    }
+
+    // 3. Post opening voucher (cleanly writes into row 7 of 4-Khata sheets)
     const postResult = await accountingEngine.postJournal(openingEntry);
 
-    // 2. Update active fiscal year in settings
+    // 4. Update active fiscal year in settings
     settingsService.updateOrganizationProfile({
       activeFiscalYear: options.nextFiscalYear,
     });
 
-    // 3. Record Audit Log
+    // 5. Record Audit Log
     try {
       await googleSheetsService.appendRow('Audit_Log', [
         `LOG-${Date.now()}`,
@@ -1006,7 +1031,7 @@ export class ClosingEngine {
         journalId,
         options.user || 'Admin',
         'SUCCESS',
-        `Closed FY ${options.currentFiscalYear}. Generated Opening Voucher ${journalNo} for FY ${options.nextFiscalYear}. Assets B/F: Rs. ${totalAssetsRolled}, Liabilities B/F: Rs. ${totalLiabilitiesRolled}.`,
+        `Closed FY ${options.currentFiscalYear}. Archived ${archivedSheets.length} sheets. Generated Opening Voucher ${journalNo} for FY ${options.nextFiscalYear}. Assets B/F: Rs. ${totalAssetsRolled}, Liabilities B/F: Rs. ${totalLiabilitiesRolled}.`,
         '',
       ]);
     } catch (e) {
@@ -1015,12 +1040,15 @@ export class ClosingEngine {
 
     serverCache.invalidateAccounting();
 
+    const archiveMsg = archivedSheets.length > 0 ? ` गत वर्षका पानाहरू (${archivedSheets.join(', ')}) अर्काइभ गरियो र` : '';
+
     return {
       success: true,
       openingJournal: postResult.journal,
       totalAssetsRolled,
       totalLiabilitiesRolled,
-      message: `✓ आर्थिक वर्ष ${options.currentFiscalYear} को हिसाब सफलतापूर्वक बन्द भयो। नयाँ आर्थिक वर्ष ${options.nextFiscalYear} को सुरुवाती मौज्दात (अ=ल्या= भौचर ${journalNo}) प्रविष्टि सम्पन्न भयो।`,
+      archivedSheets,
+      message: `✓ आर्थिक वर्ष ${options.currentFiscalYear} को हिसाब सफलतापूर्वक बन्द भयो।${archiveMsg} नयाँ आर्थिक वर्ष ${options.nextFiscalYear} को सुरुवाती मौज्दात (अ=ल्या= भौचर ${journalNo}) प्रविष्टि सम्पन्न भयो।`,
     };
   }
 

@@ -357,6 +357,127 @@ class GoogleSheetsService {
   }
 
   // =========================================================================
+  // 4b. Year-End Closing Archival & Sheet Duplication (Google Sheets API)
+  // =========================================================================
+  public async archiveYearEndSheets(fiscalYear: string): Promise<string[]> {
+    if (!this.ensureClient() || !this.sheetsClient) {
+      console.log(`[GoogleSheetsService] Mock archiveYearEndSheets for ${fiscalYear}`);
+      return [`Assets-04 (${fiscalYear} Archive)`, `Liabilities 05 (${fiscalYear} Archive)`];
+    }
+
+    try {
+      const yearTag = fiscalYear.replace(/[\/\\:\*\?\[\]]/g, '-');
+      const meta = await this.sheetsClient.spreadsheets.get({
+        spreadsheetId: this.spreadsheetId,
+      });
+
+      const existingSheets = meta.data.sheets || [];
+      const existingTitles = new Set(existingSheets.map((s) => s.properties?.title));
+
+      const targetSheetsToArchive = [
+        'Assets-04',
+        'Liabilities 05',
+        'Expenses-02',
+        'Income-03',
+        'Journal',
+        'Trial_Balance',
+        'Balance_Sheet',
+        'Profit_and_Loss',
+      ];
+
+      const requests: any[] = [];
+      const archivedTitles: string[] = [];
+
+      for (const targetTitle of targetSheetsToArchive) {
+        const found = existingSheets.find((s) => s.properties?.title === targetTitle);
+        if (!found || found.properties?.sheetId === undefined) continue;
+
+        let archiveTitle = `${targetTitle} (${yearTag} Archive)`;
+        if (existingTitles.has(archiveTitle)) {
+          archiveTitle = `${targetTitle} (${yearTag}_${Date.now().toString().slice(-4)})`;
+        }
+        existingTitles.add(archiveTitle);
+
+        requests.push({
+          duplicateSheet: {
+            sourceSheetId: found.properties.sheetId,
+            newSheetName: archiveTitle,
+          },
+        });
+        archivedTitles.push(archiveTitle);
+      }
+
+      if (requests.length > 0) {
+        await this.sheetsClient.spreadsheets.batchUpdate({
+          spreadsheetId: this.spreadsheetId,
+          requestBody: { requests },
+        });
+        console.log(`[GoogleSheetsService] Successfully duplicated ${requests.length} sheets for FY ${fiscalYear}:`, archivedTitles);
+      }
+
+      return archivedTitles;
+    } catch (err: any) {
+      console.error('[GoogleSheetsService] archiveYearEndSheets error:', err?.message || err);
+      throw new Error(`Google Sheets archival failed: ${err?.message || err}`);
+    }
+  }
+
+  // =========================================================================
+  // 4c. Clear Active 4-Khata and Journal Transaction Rows for New Fiscal Year
+  // Preserves ALL running formulas in columns A, G, J, M, P, S, V, Y, Z!
+  // =========================================================================
+  public async clearActiveKhataForNewYear(): Promise<void> {
+    if (!this.ensureClient() || !this.sheetsClient) {
+      console.log('[GoogleSheetsService] Mock clearActiveKhataForNewYear');
+      return;
+    }
+
+    try {
+      const rangesToClear = [
+        // Assets-04: clear data columns, preserve formula columns A, G, J, M, P, S, V, Y, Z
+        "'Assets-04'!B7:F356",
+        "'Assets-04'!H7:I356",
+        "'Assets-04'!K7:L356",
+        "'Assets-04'!N7:O356",
+        "'Assets-04'!Q7:R356",
+        "'Assets-04'!T7:U356",
+        "'Assets-04'!W7:X356",
+
+        // Liabilities 05: clear data columns, preserve formula columns A, G, J, M, P, S, V, Y, Z
+        "'Liabilities 05'!B7:F395",
+        "'Liabilities 05'!H7:I395",
+        "'Liabilities 05'!K7:L395",
+        "'Liabilities 05'!N7:O395",
+        "'Liabilities 05'!Q7:R395",
+        "'Liabilities 05'!T7:U395",
+        "'Liabilities 05'!W7:X395",
+
+        // Expenses-02: clear data columns, preserve formula columns A and V
+        "'Expenses-02'!B7:U196",
+
+        // Income-03: clear data columns, preserve formula columns A and L
+        "'Income-03'!B7:K244",
+
+        // Journal and Ledger: clear active data rows
+        "'Journal'!A2:Z1000",
+        "'Journal_Lines'!A2:Z2000",
+        "'Ledger'!A2:Z3000",
+      ];
+
+      await this.sheetsClient.spreadsheets.values.batchClear({
+        spreadsheetId: this.spreadsheetId,
+        requestBody: { ranges: rangesToClear },
+      });
+
+      console.log('[GoogleSheetsService] Cleared active transaction rows in 4-Khata sheets for new fiscal year (Formulas preserved)');
+      serverCache.invalidateAccounting();
+    } catch (err: any) {
+      console.error('[GoogleSheetsService] clearActiveKhataForNewYear error:', err?.message || err);
+      throw new Error(`Failed to reset active 4-Khata transaction rows: ${err?.message || err}`);
+    }
+  }
+
+  // =========================================================================
   // 5. Ensure System Sheets & Member Books Exist
   // =========================================================================
   public async ensureSystemSheets(): Promise<void> {

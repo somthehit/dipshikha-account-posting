@@ -55,6 +55,7 @@ export default function ClosingSetupPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [closingResult, setClosingResult] = useState<any | null>(null);
+  const [archiveSheets, setArchiveSheets] = useState(true);
 
   const fetchAuditReport = async (overrideFY?: string, overrideDate?: string) => {
     const fyToUse = overrideFY || currentFY;
@@ -299,6 +300,7 @@ export default function ClosingSetupPage() {
           closingDate,
           newYearOpeningDate,
           surplusAccountCode: selectedSurplusAccountCode,
+          archivePreviousYearSheets: archiveSheets,
           user: 'Admin Auditor',
         }),
       });
@@ -1208,6 +1210,27 @@ export default function ClosingSetupPage() {
                 </div>
               </div>
 
+              {/* Automated Google Sheets Archival Toggle */}
+              <div className="p-4 bg-sky-50/80 border border-sky-200 rounded-xl space-y-2">
+                <label className="flex items-start space-x-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={archiveSheets}
+                    onChange={(e) => setArchiveSheets(e.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                  />
+                  <div className="text-xs">
+                    <span className="font-bold text-slate-900 block flex items-center space-x-1.5">
+                      <span>📑</span>
+                      <span>गत आर्थिक वर्ष ({currentFY}) का पानाहरू Google Sheet मा स्वतः नयाँ प्रतिलिपि (Archive Duplicate) गर्नुहोस् (सिफारिस गरिएको / Recommended)</span>
+                    </span>
+                    <span className="text-slate-600 block mt-1 leading-relaxed">
+                      यसले Google Spreadsheet मा Assets-04, Liabilities 05, Expenses-02, Income-03, Journal, Trial Balance, र Balance Sheet का सम्पूर्ण कारोबारहरूलाई <strong>(2083-84 Archive)</strong> नाम दिएर सुरक्षित राख्दछ र चालु पानाहरूलाई नयाँ आर्थिक वर्षका लागि सफा गरी अ=ल्या= मौज्दात प्रविष्टि गर्दछ।
+                    </span>
+                  </div>
+                </label>
+              </div>
+
               {/* Execution Action Button */}
               <div className="flex justify-between items-center pt-4 border-t border-slate-100">
                 <button
@@ -1257,7 +1280,7 @@ export default function ClosingSetupPage() {
               </div>
 
               {closingResult && (
-                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2 text-xs">
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-3 text-xs">
                   <div className="flex justify-between font-bold text-emerald-900">
                     <span>बन्द भौचर (Closing Voucher):</span>
                     <span className="font-mono">{closingResult.nominalClosing?.closingJournal?.journalNo || 'CLS-COMPLETED'}</span>
@@ -1270,6 +1293,26 @@ export default function ClosingSetupPage() {
                     <span>नयाँ सक्रिय आर्थिक वर्ष (New Active FY):</span>
                     <span className="font-mono font-bold">{nextFY}</span>
                   </div>
+
+                  {/* Archived Sheets Confirmation */}
+                  {closingResult.openingRollover?.archivedSheets && closingResult.openingRollover.archivedSheets.length > 0 && (
+                    <div className="pt-2 border-t border-emerald-200/60">
+                      <div className="font-bold text-emerald-950 mb-1.5 flex items-center space-x-1.5">
+                        <span>🗄️</span>
+                        <span>Google Sheet मा सफलतापूर्वक सुरक्षित (Duplicate) गरिएका पानाहरू:</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {closingResult.openingRollover.archivedSheets.map((sheetTitle: string) => (
+                          <span
+                            key={sheetTitle}
+                            className="px-2 py-0.5 bg-white border border-emerald-300 rounded font-mono text-2xs text-emerald-900 font-semibold"
+                          >
+                            📑 {sheetTitle}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

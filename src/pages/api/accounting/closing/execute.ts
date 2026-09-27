@@ -13,6 +13,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       closingDate,
       newYearOpeningDate,
       surplusAccountCode,
+      archivePreviousYearSheets,
       user,
     } = req.body;
 
@@ -37,14 +38,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       nextFiscalYear,
       closingDate,
       newYearOpeningDate: newYearOpeningDate || closingDate,
+      archivePreviousYearSheets: archivePreviousYearSheets !== false,
       user: user || 'Closing Auditor',
     });
 
     return res.status(200).json({
       success: true,
-      message: `✓ वर्षान्त हिसाब सफलतापूर्वक सम्पन्न भयो। आ.व. ${currentFiscalYear} बन्द गरी आ.व. ${nextFiscalYear} को सुरुवाती मौज्दात (अ=ल्या=) कायम गरियो।`,
+      message: rolloverResult.message,
       nominalClosing: nominalResult,
       openingRollover: rolloverResult,
+      archivedSheets: rolloverResult.archivedSheets || [],
     });
   } catch (error: any) {
     console.error('API POST /api/accounting/closing/execute error:', error);
