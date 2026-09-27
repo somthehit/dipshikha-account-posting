@@ -93,6 +93,82 @@ export class AccountingEngine {
   }
 
   // =========================================================================
+  // Get Current Net Balance of All Accounts from Posted Journals
+  // =========================================================================
+  public async getAllAccountBalances(excludeJournalId?: string): Promise<{ [code: string]: number }> {
+    const journals = await this.getAllJournals();
+    const balances: { [code: string]: number } = {};
+
+    journals.forEach((j) => {
+      if (j.status !== 'POSTED') return;
+      if (excludeJournalId && j.journalId === excludeJournalId) return;
+
+      j.lines.forEach((l) => {
+        const dr = Number(l.debit) || 0;
+        const cr = Number(l.credit) || 0;
+        // For Assets-04 (like Cash 80, Bank 90) and Expenses-02, balance = Debit - Credit
+        // For Liabilities 05 and Income-03, balance = Credit - Debit
+        if (l.accountGroup === 'Assets-04' || l.accountGroup === 'Expenses-02') {
+          balances[l.accountCode] = (balances[l.accountCode] || 0) + (dr - cr);
+        } else {
+          balances[l.accountCode] = (balances[l.accountCode] || 0) + (cr - dr);
+        }
+      });
+    });
+
+    return balances;
+  }
+
+  // =========================================================================
+  // Cash & Bank Negative Balance Validation Rule
+  // Blocks posting if Cash (80) or Bank (90) balance would become negative (< 0)
+  // =========================================================================
+  public async validateCashAndBankBalances(
+    entry: JournalEntry,
+    excludeJournalId?: string
+  ): Promise<{ isValid: boolean; error?: string }> {
+    // Opening entries establish initial balances; skip pure opening entries
+    if (entry.transactionType === 'Opening') {
+      return { isValid: true };
+    }
+
+    const netCashChange = entry.lines
+      .filter((l) => l.accountCode === '80')
+      .reduce((sum, l) => sum + (Number(l.debit) || 0) - (Number(l.credit) || 0), 0);
+
+    const netBankChange = entry.lines
+      .filter((l) => l.accountCode === '90')
+      .reduce((sum, l) => sum + (Number(l.debit) || 0) - (Number(l.credit) || 0), 0);
+
+    // If there is an outflow (negative net change) from Cash or Bank
+    if (netCashChange < 0 || netBankChange < 0) {
+      const balances = await this.getAllAccountBalances(excludeJournalId);
+      const currentCash = balances['80'] || 0;
+      const currentBank = balances['90'] || 0;
+
+      if (netCashChange < 0 && (currentCash + netCashChange) < -0.009) {
+        const attemptedOutflow = Math.abs(netCashChange);
+        const projectedNegative = currentCash + netCashChange;
+        return {
+          isValid: false,
+          error: `अपर्याप्त नगद मौज्दात (Insufficient Cash in Hand)! हालको नगद मौज्दात रु. ${currentCash.toLocaleString()} मात्र छ, तर यो भौचरले रु. ${attemptedOutflow.toLocaleString()} भुक्तानी/क्रेडिट गर्न खोजेकोले मौज्दात ऋणात्मक (रु. ${projectedNegative.toLocaleString()}) हुन जान्छ। नगद खाता (८०) ऋणात्मक (Negative Balance) बनाउन पाइँदैन।`,
+        };
+      }
+
+      if (netBankChange < 0 && (currentBank + netBankChange) < -0.009) {
+        const attemptedOutflow = Math.abs(netBankChange);
+        const projectedNegative = currentBank + netBankChange;
+        return {
+          isValid: false,
+          error: `अपर्याप्त बैंक मौज्दात (Insufficient Bank Balance)! हालको बैंक मौज्दात रु. ${currentBank.toLocaleString()} मात्र छ, तर यो भौचरले रु. ${attemptedOutflow.toLocaleString()} भुक्तानी/क्रेडिट गर्न खोजेकोले मौज्दात ऋणात्मक (रु. ${projectedNegative.toLocaleString()}) हुन जान्छ। बैंक खाता (९०) ऋणात्मक (Negative / Overdraft) बनाउन पाइँदैन।`,
+        };
+      }
+    }
+
+    return { isValid: true };
+  }
+
+  // =========================================================================
   // Generate Next Journal Number (e.g. JE-2083-000001)
   // =========================================================================
   public async generateNextJournalNo(bsDate: string): Promise<string> {
@@ -122,6 +198,12 @@ export class AccountingEngine {
     const validation = this.validateJournal(entry, entry.lines);
     if (!validation.isValid) {
       throw new Error(`Validation failed: ${validation.errors.join(' ')}`);
+    }
+
+    // 1b. Validate Cash & Bank Negative Balances
+    const balanceCheck = await this.validateCashAndBankBalances(entry);
+    if (!balanceCheck.isValid) {
+      throw new Error(balanceCheck.error);
     }
 
     // Ensure system sheets exist
@@ -452,6 +534,15 @@ export class AccountingEngine {
     );
     if (!validation.isValid) {
       throw new Error(`Journal validation failed: ${validation.errors.join('; ')}`);
+    }
+
+    // 1b. Validate Cash & Bank Negative Balances
+    const balanceCheck = await this.validateCashAndBankBalances(
+      { ...existing, lines: updated.lines },
+      journalId
+    );
+    if (!balanceCheck.isValid) {
+      throw new Error(balanceCheck.error);
     }
 
     const totalDebit = validation.totalDebit;

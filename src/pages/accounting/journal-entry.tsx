@@ -52,6 +52,8 @@ export default function JournalEntryPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [draftNotice, setDraftNotice] = useState<string | null>(null);
+  const [cashBalance, setCashBalance] = useState<number>(0);
+  const [bankBalance, setBankBalance] = useState<number>(0);
 
   // Load Accounts from API
   useEffect(() => {
@@ -63,6 +65,8 @@ export default function JournalEntryPage() {
         if (data.accounts) {
           setAccounts(data.accounts);
         }
+        if (data.cashBalance !== undefined) setCashBalance(data.cashBalance);
+        if (data.bankBalance !== undefined) setBankBalance(data.bankBalance);
       } catch (err) {
         console.error('Failed to fetch accounts:', err);
       } finally {
@@ -252,6 +256,31 @@ export default function JournalEntryPage() {
       }
       if (lines[i].debit === 0 && lines[i].credit === 0) {
         setErrorMessage(`Line ${i + 1} has zero debit and zero credit.`);
+        return;
+      }
+    }
+
+    // Cash & Bank Negative Balance Prevention
+    if (transactionType !== 'Opening') {
+      const netCashChange = lines
+        .filter((l) => l.accountCode === '80')
+        .reduce((sum, l) => sum + (Number(l.debit) || 0) - (Number(l.credit) || 0), 0);
+
+      const netBankChange = lines
+        .filter((l) => l.accountCode === '90')
+        .reduce((sum, l) => sum + (Number(l.debit) || 0) - (Number(l.credit) || 0), 0);
+
+      if (netCashChange < 0 && (cashBalance + netCashChange) < -0.009) {
+        setErrorMessage(
+          `अपर्याप्त नगद मौज्दात (Insufficient Cash in Hand)! हालको नगद मौज्दात रु. ${cashBalance.toLocaleString()} मात्र छ। यो भौचरले रु. ${Math.abs(netCashChange).toLocaleString()} खर्च/भुक्तानी गर्न खोजेकोले नगद ऋणात्मक (रु. ${(cashBalance + netCashChange).toLocaleString()}) हुन जान्छ। नगद खाता (८०) ऋणात्मक बनाउन पाइँदैन।`
+        );
+        return;
+      }
+
+      if (netBankChange < 0 && (bankBalance + netBankChange) < -0.009) {
+        setErrorMessage(
+          `अपर्याप्त बैंक मौज्दात (Insufficient Bank Balance)! हालको बैंक मौज्दात रु. ${bankBalance.toLocaleString()} मात्र छ। यो भौचरले रु. ${Math.abs(netBankChange).toLocaleString()} खर्च/भुक्तानी गर्न खोजेकोले बैंक मौज्दात ऋणात्मक (रु. ${(bankBalance + netBankChange).toLocaleString()}) हुन जान्छ। बैंक खाता (९०) ऋणात्मक (Overdraft) बनाउन पाइँदैन।`
+        );
         return;
       }
     }
@@ -472,6 +501,35 @@ export default function JournalEntryPage() {
                 placeholder="कारोबारको स्पष्ट व्यहोरा (e.g. Office rent payment for the month of Ashwin)"
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:ring-emerald-500 focus:border-emerald-500 bg-white"
               />
+            </div>
+          </div>
+        </div>
+
+        {/* LIVE CASH & BANK BALANCE GUARD BAR */}
+        <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center space-x-2">
+              <span className="p-1.5 bg-emerald-100 text-emerald-800 rounded-lg text-sm font-bold">🛡️</span>
+              <div>
+                <span className="font-bold text-xs sm:text-sm text-slate-900 block">मौज्दात सुरक्षा गार्ड (Cash & Bank Balance Guard)</span>
+                <span className="text-2xs text-slate-500 block">नगद तथा बैंक मौज्दात ऋणात्मक (Negative) हुने कारोबार प्रणालीले स्वतः रोक्दछ।</span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className={`px-3 py-1.5 rounded-lg border text-xs flex items-center space-x-2 ${
+                cashBalance >= 0 ? 'bg-emerald-50/70 border-emerald-300 text-emerald-900' : 'bg-rose-50 border-rose-300 text-rose-900'
+              }`}>
+                <span className="text-emerald-700 font-semibold">💵 नगद मौज्दात (८०):</span>
+                <span className="font-mono font-bold text-sm">रु. {cashBalance.toLocaleString()}</span>
+              </div>
+
+              <div className={`px-3 py-1.5 rounded-lg border text-xs flex items-center space-x-2 ${
+                bankBalance >= 0 ? 'bg-sky-50/70 border-sky-300 text-sky-900' : 'bg-amber-50 border-amber-300 text-amber-900'
+              }`}>
+                <span className="text-sky-700 font-semibold">🏦 बैंक मौज्दात (९०):</span>
+                <span className="font-mono font-bold text-sm">रु. {bankBalance.toLocaleString()}</span>
+              </div>
             </div>
           </div>
         </div>
