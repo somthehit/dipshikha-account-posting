@@ -208,7 +208,10 @@ class GoogleSheetsService {
         const auth = new google.auth.JWT({
           email: clientEmail,
           key: privateKey,
-          scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+          scopes: [
+            'https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/drive',
+          ],
         });
 
         this.sheetsClient = google.sheets({ version: 'v4', auth });
